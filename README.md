@@ -1,2 +1,26 @@
 # tdd-gleaner
-Gathering virtual singer creations from the community for TianDian Daily.
+
+**拾穗者：汇集社区创作的虚拟歌手作品。**
+
+tdd-gleaner 是 TianDian Daily（TDD）的视频发现、收录与复查项目。Fetcher 寻找候选视频，checker 判断作品是否符合收录范围，收录流程管理追踪资格。
+
+## 当前阶段
+
+项目处于验证阶段，目前只有规则、评测计划与合成示例，尚无可运行的 fetcher、模型调用或收录服务。
+
+第一阶段：人工核对 50 条试标样本，用相同的标题、简介、标签输入，对比 Jev 和 OpenAI Decisions，记录分类错误、费用、延迟与失败。试标后再逐步扩充验证集。
+
+## 文档
+
+- [收录与标注规则](docs/criteria.md)
+- [数据集与评测计划](docs/evaluation.md)
+- [合成样本格式示例](examples/sample.json)
+
+## 系统边界
+
+- 发现来源可以扩展，重复发现同一视频不应默认触发重复推断；每次请求仍需留档。
+- checker 可复用于首次收录与复查；内容判断、追踪资格、采集频率分别管理。
+- 管理员的持久强制收录或排除设置优先于自动判断。
+- 新增视频的持续采集需要先具备频率控制和追踪状态过滤。
+
+接口、metadata 结构、存储实现与部署平台仍待设计。验证阶段的样本格式不等于最终服务接口。
