@@ -1,26 +1,26 @@
 # tdd-gleaner
 
-**拾穗者：汇集社区创作的虚拟歌手作品。**
+**Gathering virtual singer creations from the community.**
 
-tdd-gleaner 是 TianDian Daily（TDD）的视频发现、收录与复查项目。Fetcher 寻找候选视频，checker 判断作品是否符合收录范围，收录流程管理追踪资格。
+tdd-gleaner is the video discovery, inclusion, and recheck project for TianDian Daily (TDD). Fetchers find candidate videos, the checker evaluates content eligibility, and the inclusion workflow manages tracking eligibility.
 
-## 当前阶段
+## Current stage
 
-项目处于验证阶段，目前只有规则、评测计划与合成示例，尚无可运行的 fetcher、模型调用或收录服务。
+The project is in its evaluation phase. It currently contains criteria, an evaluation plan, and a synthetic example. Fetchers, model integrations, and the inclusion service are not implemented yet.
 
-第一阶段：人工核对 50 条试标样本，用相同的标题、简介、标签输入，对比 Jev 和 OpenAI Decisions，记录分类错误、费用、延迟与失败。试标后再逐步扩充验证集。
+The first milestone is to manually label 50 pilot samples and compare Jev with OpenAI Decisions using the same titles, descriptions, and tags. Record classification errors, cost, latency, and failures, then expand the evaluation dataset.
 
-## 文档
+## Documentation
 
-- [收录与标注规则](docs/criteria.md)
-- [数据集与评测计划](docs/evaluation.md)
-- [合成样本格式示例](examples/sample.json)
+- [Inclusion and annotation criteria](docs/criteria.md)
+- [Dataset and evaluation plan](docs/evaluation.md)
+- [Synthetic sample format](examples/sample.json)
 
-## 系统边界
+## System boundaries
 
-- 发现来源可以扩展，重复发现同一视频不应默认触发重复推断；每次请求仍需留档。
-- checker 可复用于首次收录与复查；内容判断、追踪资格、采集频率分别管理。
-- 管理员的持久强制收录或排除设置优先于自动判断。
-- 新增视频的持续采集需要先具备频率控制和追踪状态过滤。
+- Discovery sources are extensible. Finding the same video again should not trigger inference again by default, but every request must remain traceable.
+- The checker supports both initial inclusion and rechecks. Content labels, tracking eligibility, and collection frequency are separate concerns.
+- Persistent administrator overrides for inclusion or exclusion take precedence over automated decisions.
+- Ongoing collection for newly included videos requires frequency controls and filtering by tracking status.
 
-接口、metadata 结构、存储实现与部署平台仍待设计。验证阶段的样本格式不等于最终服务接口。
+Interfaces, request metadata, storage, and deployment remain to be designed. The evaluation sample format is not the final service interface.

@@ -2,13 +2,17 @@
   "sample_id": "synthetic-voicebank-song",
   "synthetic": true,
   "input": {
-    "title": "【示例声库】一首原创歌曲",
-    "desc": "本例为虚构数据。歌曲由示例声库演唱，包含作曲、作词与声库调教。",
-    "tags": ["虚拟歌手", "原创曲", "声库调教"]
+    "title": "[Example Voicebank] An original song",
+    "desc": "This is a fictional example. Example Voicebank performs an original song with composition, lyrics, and voicebank tuning.",
+    "tags": [
+      "virtual singer",
+      "original song",
+      "voicebank tuning"
+    ]
   },
   "reference": {
     "uses_voicebank": true,
     "is_vocal_work": true,
-    "reason": "虚构场景明确设定为声库演绎的原创歌曲。"
+    "reason": "The fictional scenario explicitly describes an original song performed using a voicebank."
   }
 }
