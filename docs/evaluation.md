@@ -1,45 +1,45 @@
-# Dataset and evaluation plan
+# 数据集与评测计划
 
-## First round
+## 第一轮
 
-Start with 50 manually labeled pilot samples to check whether the criteria are usable, then expand to approximately 200-300 samples. These are starting sizes, not guarantees of statistical accuracy.
+先人工试标 50 条，确认规则可执行，再扩展到约 200～300 条。样本数量是起步规模，不是统计准确性的保证。
 
-Cover three groups:
+覆盖三类样本：
 
-- Popular eligible works and popular negative examples, emphasizing content that must not be missed.
-- Ordinary candidates drawn from multiple sources, including videos outside the existing collection.
-- Edge cases such as human covers, obscure or new voicebanks, comic dialogue, tuned speech, news, and fully AI-generated music.
+- 热门目标作品与热门反例，重点观察不能漏掉的内容。
+- 从多个来源抽取的普通候选，包括已有收录之外的视频。
+- 真人翻唱、小众或新声库、相声、语调、资讯、纯 AI 音乐等边界案例。
 
-Select candidates and assign human labels independently of the models under evaluation. Agreement between models is not a substitute for human ground truth.
+候选选择与人工标注不依赖待测模型的结论。多个模型一致也不能代替人工真值。
 
-## Samples and versions
+## 样本与版本
 
-Each real sample should retain at least its aid, a title/description/tags snapshot, acquisition time, two human labels, a short rationale, source, and evaluation group. Unresolved human labels may remain null.
+每条真实样本至少保留 aid、标题／简介／标签快照、获取时间、两个人工标签、简短依据，以及来源和评测分组。人工标签待确认时允许留空。
 
-Models receive only the three text fields from the snapshot. Sources, groups, and human judgments are evaluation context, not model input. The final request metadata structure will be designed separately.
+模型只接收快照内的三个文本字段。来源、分组和人工判断属于评测信息，不送入模型。请求 metadata 的最终结构另行设计。
 
-The [synthetic example](../examples/sample.json) illustrates the evaluation envelope; only its `input` object goes to the model. It does not represent a real video and must not count toward accuracy. Real samples also require an aid and acquisition time.
+[合成示例](../examples/sample.json) 展示的是评测封装；其中只有 `input` 对象进入模型。示例不对应真实视频，不能计入准确率。真实样本需补充 aid 和获取时间。
 
-Freeze dataset versions and input snapshots. Refetching information must not silently overwrite historical evaluation inputs. Keep snapshots of the same aid in the same dataset split to prevent leakage between tuning and final evaluation.
+固定数据集版本和输入快照；重新获取的信息不得静默覆盖历史评测输入。同一 aid 的不同快照应保持在同一个数据划分中，避免训练式调参与验收之间泄漏。
 
-Use pilot data to improve criteria, prompts, and thresholds. Reserve a separate set of manually verified samples for final evaluation, without repeatedly tuning against it. Choose split proportions after reviewing the available samples.
+试标数据可用于改进规则、提示词和阈值。独立保留一部分人工核对样本作最终验收，不用它反复调参；分组比例在样本盘点后确定。
 
-## Comparison and records
+## 对比与留档
 
-The first round compares Jev with OpenAI Decisions using identical input content, with prompts and thresholds selected separately for each model. These are candidates; no evaluation results are available yet.
+第一轮比较 Jev 与 OpenAI Decisions，输入内容一致，分别选择适合各模型的提示词和阈值。此处是候选方案，尚无实际评测结果。
 
-Retain the following for each run:
+每次运行保留：
 
-- Dataset version, exact model input and prompt, requested model identifier, and any version information returned by the service.
-- Raw responses, available probabilities or labels, thresholds, final flags, and inclusion decisions.
-- Usage, actual charges or explicitly marked cost estimates, latency, errors, and retries.
+- 数据集版本、完整实际输入和提示词、请求模型标识及服务返回的版本信息。
+- 原始响应、可用的概率或标签、阈值、最终两个 flag 和收录结论。
+- 用量、实际计费或明确标注的费用估算、耗时、错误和重试情况。
 
-Report performance for each flag and for the final inclusion decision. Focus on missed eligible works and incorrectly included ineligible works. Show sample counts and errors separately for popular, ordinary, and edge-case groups. Report acquisition failures, inference failures, and unresolved annotations separately; do not treat them as negative examples or silently omit them.
+分别报告两个 flag 和最终收录的表现。重点查看目标作品漏收、非目标作品误收，并列出热门、普通、边界分组的样本数和错误样本。另报获取／推断失败与待确认数量，不将它们视作负例或静默排除。
 
-Report cost per 10,000 items and latency distributions, identifying the measurement sample size. Results on deliberately selected difficult examples do not represent platform-wide accuracy. Discovery misses, checker rejections, and persistence failures are distinct problems.
+报告实际每万条费用和延迟分布；小样本测量需标明规模。刻意挑选的难例结果不代表全站准确率。发现不到视频、分类拒绝、执行入库失败是不同问题。
 
-## Data storage
+## 数据保存
 
-Keep real datasets, acquisition snapshots, and complete run records in the ignored `data/`, `runs/`, and `artifacts/` directories, or in separate durable storage, with appropriate backups. Git ignore rules do not provide backups or prevent forced additions.
+真实数据集、抓取快照和完整运行档案分别放在被忽略的 `data/`、`runs/`、`artifacts/` 中，或独立的持久存储中，并自行备份。Git 忽略规则不提供备份，也不阻止误用强制添加。
 
-The repository maintains criteria, format documentation, and synthetic examples. Publishing real data requires a separate review. Run records must support later reconstruction of decisions rather than relying on short-lived service logs.
+仓库维护规则、格式说明及合成示例；真实数据发布需单独检查。运行档案应能在日后重现结论，不能只依赖短期服务日志。

@@ -1,7 +1,9 @@
 # Contributor and agent instructions
 
 - Keep changes focused on the current milestone and distinguish planned behavior from implemented behavior.
-- Use English by default for repository documentation, comments, examples, commit messages, and GitHub titles and descriptions. Keep source-language text intact when it is necessary for real data or multilingual evaluation fixtures.
+- Use English for the main README, commit messages, and pull request titles and descriptions.
+- Domain-specific documentation, annotation guidance, and examples may use Chinese. Preserve Chinese virtual singer community terminology in its original form; add English explanations when useful rather than replacing the original terms. Keep source data in its original language.
+- Use English identifiers in code and structured data.
 - Keep credentials, personal data, deployment-specific configuration, local filesystem paths, and internal operational records out of all public files and GitHub metadata.
 - Use synthetic examples by default. Review any real dataset separately before publishing it.
 - Keep raw acquisition data and evaluation runs outside version control. Preserve the exact model input, model and prompt versions, outputs, and evaluation settings in durable run artifacts.

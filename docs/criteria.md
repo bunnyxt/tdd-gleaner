@@ -1,41 +1,41 @@
-# Inclusion and annotation criteria
+# 收录与标注规则
 
-These criteria guide the first annotation pilot and model evaluation. The goal is to collect voicebank performances, prioritizing low false-negative rates for popular eligible works.
+本规则用于第一轮人工试标与模型验证。目标是汇集声库演绎作品，优先减少热门目标作品的漏收。
 
-## Two independent judgments
+## 两个独立判断
 
-| Field | Meaning |
+| 字段 | 含义 |
 | --- | --- |
-| `uses_voicebank` | The work actually uses a virtual singer voicebank to perform vocals or speech, rather than merely mentioning a voicebank, character, or engine. |
-| `is_vocal_work` | The video primarily presents a vocal performance, including songs, comic dialogue, or tuned speech. News and merchandise presentations are outside this scope. |
+| `uses_voicebank` | 作品实际使用虚拟歌手声库演绎出声，而非只在文字中提到声库、角色或引擎。 |
+| `is_vocal_work` | 视频以声音演绎作品为主体，包括歌曲、相声、语调等；新闻、周边介绍等不属于此范围。 |
 
-Normal automated inclusion requires both fields to be `true`. A human-performed song can satisfy the second criterion without satisfying the first. An unresolved human label may temporarily be `null` rather than being forced to `false`; this is an annotation status, not a third boolean value for completed model judgments.
+普通自动收录要求两个字段均为 `true`。真人演唱歌曲可以满足第二项，但不满足第一项。人工尚不能确认的字段暂存 `null`，不强行标为 `false`；它不是模型已完成判断的第三种 boolean 值。
 
-## Typical cases
+## 典型案例
 
-| Video content | Normal inclusion decision |
+| 视频内容 | 正常收录结论 |
 | --- | --- |
-| An original song or cover performed using a virtual singer voicebank | Include |
-| A different virtual singer voicebank covering an existing virtual singer song | Include |
-| Comic dialogue or tuned speech performed using a voicebank | Include |
-| A human cover of a virtual singer song | Exclude |
-| Virtual singer news or merchandise presentations, including brief preview clips | Exclude |
-| Fully AI-generated music without a corresponding voicebank | Exclude |
+| 虚拟歌手声库演绎的原创曲或翻唱曲 | 收录 |
+| 另一虚拟歌手声库翻唱已有的虚拟歌手歌曲 | 收录 |
+| 使用声库演绎的相声、语调作品 | 收录 |
+| 真人翻唱虚拟歌手歌曲 | 不收录 |
+| 虚拟歌手新闻、周边介绍，包含少量试听片段 | 不收录 |
+| 无对应声库的纯 AI 生成音乐 | 不收录 |
 
-The original song, character names in the title, upload category, or discovery source cannot independently establish eligibility. The use of AI technology does not replace the two content judgments. Do not exclude new voicebanks through a closed list of supported engines.
+原曲、标题中的角色名称、投稿分区或发现来源都不能单独决定收录。是否采用 AI 技术也不能替代对声库使用和作品类型的判断。不使用封闭的引擎名单排除新声库。
 
-## Model input
+## 模型输入
 
-Version 1 includes only `title`, `desc`, and `tags`. Uploader nicknames, view counts, discovery sources, request metadata, human labels, and annotation rationales are not model inputs.
+第一版只包含 `title`、`desc`、`tags`。投稿者昵称、播放量、发现来源、请求 metadata、人工标签和标注理由均不进入模型输入。
 
-Do not invoke the model when information acquisition fails. Record a separate acquisition failure or unavailable status. Distinguish a legitimately empty description from an acquisition failure; a deleted video must not become two `false` labels.
+资料获取失败时不调用模型，任务记录为单独的获取失败或不可用状态。合法的空简介与获取失败必须区分；视频删除不能转换成两个 `false`。
 
-Human annotators may watch videos, listen to audio, and verify voicebank information. Note insufficient textual evidence where applicable, so evaluation can distinguish classification errors from missing input information. Leave unresolved cases, such as mixed human and voicebank performances or compilations, pending until the pilot clarifies the criteria.
+人工标注可观看视频、听取音频并核对声库信息。必要时注明文本证据不足，以便区分模型分类错误与输入信息不足。混合演唱、剪辑合集等未明确的边界先保留待确认，试标时补充规则。
 
-## Judgment and execution
+## 判断与执行
 
-Store model outputs separately from inclusion execution. When a model returns probabilities, convert them into flags using validated thresholds; do not assume every model should share a threshold. Correct output structure does not guarantee correct classification.
+模型输出与收录执行分开保存。模型返回概率时，由经过验证的阈值转换为 flag；不预设所有模型共用一个阈值。格式正确不代表语义正确。
 
-Persistent administrator overrides can force inclusion or exclusion. Ordinary inclusion requests and rechecks cannot supersede them. A one-time bypass of content checks is not a persistent override.
+持久管理员设置可强制收录或排除；普通收录请求与复查不能推翻它。一次绕过检查的请求不等同于持久设置。
 
-Removal uses a separate tracking switch and preserves historical data. Acquisition failures, inference failures, or ordinary title and tag changes should not directly trigger removal. Text alone cannot reliably establish whether the underlying audio or video has been replaced.
+移出使用独立的追踪开关，保留历史数据。获取或推断失败、普通标题或标签变化不应直接导致移出。仅凭文本也无法可靠判断实际音视频是否换源。

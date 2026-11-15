@@ -12,8 +12,8 @@ The first milestone is to manually label 50 pilot samples and compare Jev with O
 
 ## Documentation
 
-- [Inclusion and annotation criteria](docs/criteria.md)
-- [Dataset and evaluation plan](docs/evaluation.md)
+- [Inclusion and annotation criteria (Chinese)](docs/criteria.md)
+- [Dataset and evaluation plan (Chinese)](docs/evaluation.md)
 - [Synthetic sample format](examples/sample.json)
 
 ## System boundaries
