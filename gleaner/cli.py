@@ -111,7 +111,9 @@ def run(args) -> int:
             resolve_data_dir(str(args.csv.parent), allow_git=args.allow_git_dir)
             _print({"rows": export_annotations(store, args.csv, args.all_snapshots), "csv": str(args.csv)})
         elif args.command == "import-annotations":
-            _print(import_annotations(store, args.csv, args.rules_version, args.annotator))
+            result = import_annotations(store, args.csv, args.rules_version, args.annotator)
+            _print(result)
+            return 1 if result["rejected"] else 0
         elif args.command == "export-bundle":
             resolve_data_dir(str(args.out), allow_git=args.allow_git_dir)
             _print(export_bundle(store, args.out))

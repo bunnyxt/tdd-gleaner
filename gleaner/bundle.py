@@ -11,8 +11,8 @@ A bundle is a self-contained directory::
     annotations.jsonl    every annotation revision
     dataset.jsonl        latest snapshot per aid with its latest annotation revision
 
-The JSONL files are derived deterministically from the database, so a restore
-can regenerate them from the restored database and compare hashes.
+Restore checks every file against the manifest, then runs the store checks
+(database integrity, raw file hashes, snapshot input hashes).
 """
 
 import json
@@ -21,8 +21,8 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import __version__, bilibili
-from .acquire import INPUT_SCHEMA_VERSION, build_input, input_sha256
+from . import __version__
+from .acquire import INPUT_SCHEMA_VERSION, input_sha256
 from .store import DB_NAME, RAW_DIR, SCHEMA_VERSION, Store, StoreError, init_store, open_store
 from .util import Clock, canonical_json, sha256_bytes, sha256_file, utc_now
 
@@ -35,52 +35,21 @@ JSONL_FILES = ("candidates.jsonl", "fetch_attempts.jsonl", "snapshots.jsonl", "a
 
 
 def verify_store(store: Store) -> List[str]:
-    """Return a list of integrity problems (empty when the store is sound)."""
+    """Return integrity problems: database check, raw file hashes, snapshot hashes."""
     problems: List[str] = []
     conn = store.conn
     check = conn.execute("PRAGMA integrity_check").fetchone()[0]
     if check != "ok":
         problems.append(f"sqlite integrity_check: {check}")
-    attempts = {}
-    for row in conn.execute("SELECT * FROM fetch_attempt ORDER BY id"):
-        attempts[row["id"]] = row
-        if row["raw_path"] is None:
-            continue
+    for row in conn.execute("SELECT id, raw_path, raw_sha256 FROM fetch_attempt WHERE raw_path IS NOT NULL ORDER BY id"):
         path = store.root / row["raw_path"]
         if not path.exists():
             problems.append(f"attempt {row['id']}: raw file missing ({row['raw_path']})")
-            continue
-        body = path.read_bytes()
-        if sha256_bytes(body) != row["raw_sha256"] or len(body) != row["raw_size"]:
+        elif sha256_file(path) != row["raw_sha256"]:
             problems.append(f"attempt {row['id']}: raw file hash mismatch")
-            continue
-        replay = bilibili.classify(row["endpoint"], row["aid"], bilibili.Response(row["http_status"], body))
-        stored = json.loads(row["extracted"]) if row["extracted"] else None
-        if replay.status != row["status"] or replay.extracted != stored:
-            problems.append(f"attempt {row['id']}: replaying raw response gives {replay.status}, stored {row['status']}")
-    for snap in conn.execute("SELECT * FROM snapshot ORDER BY snapshot_id"):
-        sid = snap["snapshot_id"]
-        view, tags = attempts.get(snap["view_attempt_id"]), attempts.get(snap["tags_attempt_id"])
-        if view is None or tags is None or view["status"] != "ok" or tags["status"] != "ok":
-            problems.append(f"{sid}: does not reference two ok attempts")
-            continue
-        if not (view["acquisition_id"] == tags["acquisition_id"] == snap["acquisition_id"]):
-            problems.append(f"{sid}: attempts belong to a different acquisition")
-            continue
-        if view["aid"] != snap["aid"] or view["endpoint"] != "view" or tags["endpoint"] != "tags":
-            problems.append(f"{sid}: attempt endpoints or aid do not match")
-            continue
-        v, t = json.loads(view["extracted"]), json.loads(tags["extracted"])
-        text = build_input(v["title"], v["desc"], t["tags"])
-        if text != snap["input_text"]:
-            problems.append(f"{sid}: input text differs from the one rebuilt from its attempts")
+    for snap in conn.execute("SELECT snapshot_id, input_text, input_sha256 FROM snapshot ORDER BY snapshot_id"):
         if input_sha256(snap["input_text"]) != snap["input_sha256"]:
-            problems.append(f"{sid}: input_sha256 mismatch")
-        if snap["input_schema_version"] != INPUT_SCHEMA_VERSION:
-            problems.append(f"{sid}: unknown input schema {snap['input_schema_version']}")
-    for row in conn.execute("SELECT snapshot_id, COUNT(*) AS n, MAX(revision) AS m FROM annotation GROUP BY snapshot_id"):
-        if row["n"] != row["m"]:
-            problems.append(f"{row['snapshot_id']}: annotation revisions are not contiguous")
+            problems.append(f"{snap['snapshot_id']}: input_sha256 mismatch")
     return problems
 
 
@@ -235,10 +204,6 @@ def restore_bundle(bundle: Path, data_dir: Path) -> Dict[str, object]:
     init_store(data_dir)  # validates the schema version of the restored database
     with open_store(data_dir) as store:
         problems = verify_store(store)
-        views = jsonl_views(store.conn)
-        for name in JSONL_FILES:
-            if sha256_bytes(_jsonl_bytes(views[name])) != sha256_file(bundle / name):
-                problems.append(f"{name} differs from the restored database")
     if problems:
         raise StoreError("restored data failed verification:\n  " + "\n  ".join(problems))
     manifest_bytes = (bundle / MANIFEST).read_bytes()

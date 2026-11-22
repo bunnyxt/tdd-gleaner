@@ -83,7 +83,7 @@ Values are used as returned: no cleaning, truncation, or tag de-duplication. The
 | `annotator` | yes | Or pass `--annotator` |
 | `title`, `desc`, `tags` | no | For reading only; ignored on import |
 
-`import-annotations` validates the whole file before writing anything. It rejects the file if any row has an invalid value, appears twice, does not match its snapshot's aid or input hash, or has a `base_revision` that is not the current revision. The last check catches both stale exports and re-imports of an already applied file. Each changed row appends revision `base_revision + 1` with the given `--rules-version`; unchanged and untouched rows are skipped. Snapshots are never modified.
+`import-annotations` applies each valid row and skips the rest, listing every skipped row with its line number and reason; the command exits with status 1 when any row was skipped. A row is skipped if it has an invalid value, does not match its snapshot's aid or input hash, or has a `base_revision` that is not the current revision. The last check catches both stale exports and re-imports of an already applied file. If one snapshot appears on several rows, all of them are skipped. Each applied row appends revision `base_revision + 1` with the given `--rules-version`; unchanged and untouched rows are left alone. Snapshots are never modified.
 
 ### Bundles
 
@@ -100,7 +100,7 @@ Values are used as returned: no cleaning, truncation, or tag de-duplication. The
 | `annotations.jsonl` | Every annotation revision |
 | `dataset.jsonl` | Latest snapshot per aid with its latest annotation revision |
 
-`verify-bundle` checks the manifest hashes and looks for unlisted files. `restore-bundle` does the same, copies the bundle into an empty data directory, and then verifies the restored data: raw file hashes, a replay of every raw response through the classifier, every snapshot input rebuilt from its attempts, contiguous annotation revisions, and JSONL files regenerated from the restored database and compared with the bundle. `verify` runs the same store checks on any data directory.
+`verify-bundle` checks the manifest hashes and looks for unlisted files. `restore-bundle` does the same, copies the bundle into an empty data directory, and runs `verify` on the result. `verify` checks database integrity, raw file hashes, and that every snapshot's input string matches its stored hash.
 
 ## Synthetic example
 

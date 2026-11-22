@@ -6,8 +6,8 @@ Each exported row is one snapshot. Editable columns are the two labels,
 are never used as import input.
 
 Import locates rows by ``aid`` + ``snapshot_id`` + ``base_revision`` and
-appends revision ``base_revision + 1``. A file is applied atomically: any
-invalid, duplicate, or stale row rejects the whole file.
+appends revision ``base_revision + 1``. Invalid, duplicate, or stale rows are
+skipped and reported; the other rows are applied.
 """
 
 import csv
@@ -24,12 +24,6 @@ CONTEXT = ["title", "desc", "tags"]
 COLUMNS = KEYS + EDITABLE + CONTEXT
 TEXT_EVIDENCE = ("sufficient", "insufficient", "uncertain")
 LABEL_VALUES = {"true": 1, "false": 0, "null": None}
-
-
-class AnnotationImportError(StoreError):
-    def __init__(self, errors: List[str]):
-        super().__init__("annotation import rejected:\n  " + "\n  ".join(errors))
-        self.errors = errors
 
 
 def _label_text(value: Optional[int]) -> str:
@@ -135,49 +129,60 @@ def _same_as(current, parsed: dict) -> bool:
 def import_annotations(
     store: Store, path: Path, rules_version: str, default_annotator: Optional[str] = None, clock: Clock = utc_now,
 ) -> Dict[str, int]:
-    """Validate a whole CSV, then append one revision per changed row."""
+    """Append one revision per valid, changed row; report rejected rows.
+
+    Invalid rows are skipped and listed in ``rejected`` with their line and
+    reason. Valid rows in the same file are still applied.
+    """
     if not rules_version:
         raise StoreError("rules_version is required")
     with open(path, newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         missing = [c for c in KEYS + EDITABLE if c not in (reader.fieldnames or [])]
         if missing:
-            raise AnnotationImportError([f"missing columns: {', '.join(missing)}"])
+            raise StoreError(f"annotation CSV is missing columns: {', '.join(missing)}")
         rows = list(reader)
 
-    errors: List[str] = []
+    rejected: List[str] = []
     parsed: List[dict] = []
-    seen: Dict[str, int] = {}
+    untouched = 0
     for line_no, row in enumerate(rows, start=2):
         item, row_errors = _parse_row(line_no, row, default_annotator)
-        errors.extend(row_errors)
-        if item is None:
-            continue
-        if item["snapshot_id"] in seen:
-            errors.append(f"line {line_no}: duplicate row for {item['snapshot_id']} (first on line {seen[item['snapshot_id']]})")
-            continue
-        seen[item["snapshot_id"]] = line_no
-        parsed.append(item)
+        if row_errors:
+            rejected.extend(row_errors)
+        elif item is None:
+            untouched += 1
+        else:
+            parsed.append(item)
+
+    # A snapshot listed twice is ambiguous: reject every row for it.
+    lines_by_snapshot: Dict[str, List[int]] = {}
+    for item in parsed:
+        lines_by_snapshot.setdefault(item["snapshot_id"], []).append(item["line"])
 
     latest = latest_revisions(store)
     to_insert = []
     unchanged = 0
     for item in parsed:
         where = f"line {item['line']}"
+        lines = lines_by_snapshot[item["snapshot_id"]]
+        if len(lines) > 1:
+            rejected.append(f"{where}: duplicate rows for {item['snapshot_id']} (lines {', '.join(map(str, lines))})")
+            continue
         snap = store.conn.execute("SELECT aid, input_sha256 FROM snapshot WHERE snapshot_id = ?", (item["snapshot_id"],)).fetchone()
         if snap is None:
-            errors.append(f"{where}: unknown snapshot_id {item['snapshot_id']!r}")
+            rejected.append(f"{where}: unknown snapshot_id {item['snapshot_id']!r}")
             continue
         if snap["aid"] != item["aid"]:
-            errors.append(f"{where}: snapshot {item['snapshot_id']} belongs to aid {snap['aid']}, not {item['aid']}")
+            rejected.append(f"{where}: snapshot {item['snapshot_id']} belongs to aid {snap['aid']}, not {item['aid']}")
             continue
         if item["input_sha256"] and item["input_sha256"] != snap["input_sha256"]:
-            errors.append(f"{where}: input_sha256 does not match snapshot {item['snapshot_id']}")
+            rejected.append(f"{where}: input_sha256 does not match snapshot {item['snapshot_id']}")
             continue
         current = latest.get(item["snapshot_id"])
         current_rev = current["revision"] if current is not None else 0
         if item["base_revision"] != current_rev:
-            errors.append(
+            rejected.append(
                 f"{where}: stale or duplicate revision for {item['snapshot_id']}: "
                 f"base_revision {item['base_revision']}, current revision {current_rev}; export again and reapply"
             )
@@ -186,9 +191,6 @@ def import_annotations(
             unchanged += 1
             continue
         to_insert.append((item, current_rev + 1))
-
-    if errors:
-        raise AnnotationImportError(errors)
 
     now = clock()
     batch = f"annotations:{now}:{path.name}"
@@ -201,4 +203,5 @@ def import_annotations(
                 (item["snapshot_id"], revision, item["uses_voicebank"], item["is_vocal_work"], item["text_evidence"],
                  item["rationale"], item["evidence_locator"], item["null_reason"], item["annotator"], rules_version, now, batch),
             )
-    return {"rows": len(rows), "revisions_added": len(to_insert), "unchanged": unchanged, "untouched": len(rows) - len(parsed)}
+    rejected.sort(key=lambda e: int(e.split(":", 1)[0].split()[1]))
+    return {"rows": len(rows), "revisions_added": len(to_insert), "unchanged": unchanged, "untouched": untouched, "rejected": rejected}

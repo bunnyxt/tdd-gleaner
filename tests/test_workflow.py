@@ -9,7 +9,7 @@ from pathlib import Path
 
 from gleaner import bilibili
 from gleaner.acquire import Fetcher, build_input, candidates_without_snapshot, import_candidates, input_sha256, status_summary
-from gleaner.annotations import AnnotationImportError, export_annotations, import_annotations
+from gleaner.annotations import export_annotations, import_annotations
 from gleaner.bundle import export_bundle, restore_bundle, verify_bundle, verify_store
 from gleaner.cli import main
 from gleaner.store import StoreError, init_store, open_store, resolve_data_dir
@@ -387,19 +387,22 @@ class AnnotationTests(StoreTestCase):
         self.fill(rows[0])
         self.write_rows(path, rows)
         import_annotations(self.store, path, "rules-1")
-        with self.assertRaises(AnnotationImportError) as ctx:
-            import_annotations(self.store, path, "rules-1")
-        self.assertIn("stale or duplicate revision", ctx.exception.errors[0])
+        result = import_annotations(self.store, path, "rules-1")
+        self.assertEqual(result["revisions_added"], 0)
+        self.assertIn("stale or duplicate revision", result["rejected"][0])
         self.assertEqual(len(self.revisions("snap-1-1")), 1)
 
-    def test_whole_file_rejected_on_any_error(self):
+    def test_invalid_rows_are_skipped_and_valid_rows_applied(self):
         path, rows = self.export()
         self.fill(rows[0])
         self.fill(rows[1], uses_voicebank="maybe")
         self.write_rows(path, rows)
-        with self.assertRaises(AnnotationImportError):
-            import_annotations(self.store, path, "rules-1")
-        self.assertEqual(self.store.conn.execute("SELECT COUNT(*) FROM annotation").fetchone()[0], 0)
+        result = import_annotations(self.store, path, "rules-1")
+        self.assertEqual(result["revisions_added"], 1)
+        self.assertEqual(len(result["rejected"]), 1)
+        self.assertTrue(result["rejected"][0].startswith("line 3:"))
+        self.assertEqual(len(self.revisions("snap-1-1")), 1)
+        self.assertEqual(self.revisions("snap-2-2"), [])
 
     def test_validation_errors(self):
         path, rows = self.export()
@@ -415,13 +418,15 @@ class AnnotationTests(StoreTestCase):
         ]
         for row, message in bad:
             self.write_rows(path, [row])
-            with self.assertRaises(AnnotationImportError, msg=message) as ctx:
-                import_annotations(self.store, path, "rules-1")
-            self.assertIn(message, "\n".join(ctx.exception.errors))
-        self.write_rows(path, [self.fill(dict(rows[0])), self.fill(dict(rows[0]))])
-        with self.assertRaises(AnnotationImportError) as ctx:
-            import_annotations(self.store, path, "rules-1")
-        self.assertIn("duplicate row", ctx.exception.errors[0])
+            result = import_annotations(self.store, path, "rules-1")
+            self.assertEqual(result["revisions_added"], 0, message)
+            self.assertIn(message, "\n".join(result["rejected"]))
+        self.write_rows(path, [self.fill(dict(rows[0])), self.fill(dict(rows[0], rationale="另一个"))])
+        result = import_annotations(self.store, path, "rules-1")
+        self.assertEqual(result["revisions_added"], 0)
+        self.assertEqual(len(result["rejected"]), 2)
+        self.assertIn("duplicate rows", result["rejected"][0])
+        self.assertEqual(self.store.conn.execute("SELECT COUNT(*) FROM annotation").fetchone()[0], 0)
 
     def test_context_columns_are_not_inputs(self):
         path, rows = self.export()
@@ -544,7 +549,7 @@ class SyntheticExampleTests(unittest.TestCase):
                 writer.writeheader()
                 writer.writerows(rows)
             self.assertEqual(cli("import-annotations", str(labels), "--rules-version", "example", "--annotator", "demo"), 0)
-            self.assertEqual(cli("import-annotations", str(labels), "--rules-version", "example", "--annotator", "demo"), 2)
+            self.assertEqual(cli("import-annotations", str(labels), "--rules-version", "example", "--annotator", "demo"), 1)
             self.assertEqual(cli("verify"), 0)
             self.assertEqual(cli("export-bundle", str(tmp / "bundle")), 0)
             self.assertEqual(cli("verify-bundle", str(tmp / "bundle"), data_dir=None), 0)
