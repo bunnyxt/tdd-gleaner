@@ -1,8 +1,10 @@
+<img src="https://gw.alipayobjects.com/zos/antfincdn/R8sN%24GNdh6/language.svg" width="18"> English | [简体中文](./README_zh-CN.md)
+
 # tdd-gleaner
 
 **Gathering virtual singer creations from the community.**
 
-tdd-gleaner is the video discovery, inclusion, and recheck project for TianDian Daily (TDD). Fetchers find candidate videos, the checker evaluates content eligibility, and the inclusion workflow manages tracking eligibility.
+tdd-gleaner is the video discovery, inclusion, and recheck project for [TianDian Daily](https://tdd.bunnyxt.com) (TDD). Fetchers find candidate videos, the checker evaluates content eligibility, and the inclusion workflow manages tracking eligibility.
 
 ## Current stage
 

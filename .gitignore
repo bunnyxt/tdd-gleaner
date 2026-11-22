@@ -1,31 +1,5 @@
-# Credentials and local settings
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-
-# Real datasets and run artifacts
-/data/
-/runs/
-/artifacts/
-*.sqlite
-*.sqlite3
-*.db
-*.log
-
-# Python and development tools
-.venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-dist/
-build/
-*.egg-info/
-.idea/
-.vscode/
+# macOS
 .DS_Store
+
+# Local credentials
+.env

@@ -9,6 +9,7 @@
   "reference": {
     "uses_voicebank": true,
     "is_vocal_work": true,
+    "text_evidence": "sufficient",
     "reason": "虚构场景明确设定为声库演绎的原创歌曲。"
   }
 }

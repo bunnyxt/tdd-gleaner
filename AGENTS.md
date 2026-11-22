@@ -1,7 +1,7 @@
 # Contributor and agent instructions
 
 - Keep changes focused on the current milestone and distinguish planned behavior from implemented behavior.
-- Use English for the main README, commit messages, and pull request titles and descriptions.
+- Use English for `README.md`, commit messages, and pull request titles and descriptions. Keep `README_zh-CN.md` in sync with `README.md` in the same change.
 - Domain-specific documentation, annotation guidance, and examples may use Chinese. Preserve Chinese virtual singer community terminology in its original form; add English explanations when useful rather than replacing the original terms. Keep source data in its original language.
 - Use English identifiers in code and structured data.
 - Keep credentials, personal data, deployment-specific configuration, local filesystem paths, and internal operational records out of all public files and GitHub metadata.
