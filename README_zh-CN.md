@@ -8,15 +8,27 @@ tdd-gleaner 是[天钿 Daily](https://tdd.bunnyxt.com)（TDD）的视频发现�
 
 ## 当前阶段
 
-项目处于评测阶段，目前只有收录规则、评测计划和一个虚构示例；fetcher、模型接入与收录服务尚未实现。
+项目处于评测阶段，目前有收录规则、评测计划、虚构示例，以及用于构建评测数据集的离线实验资料库；fetcher、模型接入与收录服务尚未实现。
 
 第一个里程碑是人工试标 50 条样本，并用相同的标题、简介和标签比较 Jev 与 OpenAI Decisions，记录分类错误、费用、延迟和失败情况，随后扩充评测数据集。
+
+## 实验资料库
+
+`gleaner` 命令（Python 3.9+，仅用标准库）导入候选 aid，获取标题、简介和标签并生成不可变的输入快照，以 CSV 导出和导入人工标注，并生成可校验的数据包。实验资料保存在显式指定、位于版本控制之外的数据目录中。
+
+```bash
+python -m gleaner --data-dir /path/outside/the/repo init
+python -m unittest discover -s tests -t .
+```
+
+完整流程与使用虚构数据的离线演示见[实验资料库说明（英文）](docs/experiment-store.md)。
 
 ## 文档
 
 - [收录与标注规则](docs/criteria.md)
 - [数据集与评测计划](docs/evaluation.md)
-- [虚构样本格式](examples/sample.json)
+- [实验资料库（英文）](docs/experiment-store.md)
+- [虚构样本格式](examples/sample.json)与[虚构资料获取样例](examples/synthetic/)
 
 ## 系统边界
 

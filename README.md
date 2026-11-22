@@ -8,15 +8,27 @@ tdd-gleaner is the video discovery, inclusion, and recheck project for [TianDian
 
 ## Current stage
 
-The project is in its evaluation phase. It currently contains criteria, an evaluation plan, and a synthetic example. Fetchers, model integrations, and the inclusion service are not implemented yet.
+The project is in its evaluation phase. It currently contains criteria, an evaluation plan, synthetic examples, and an offline experiment store for building the evaluation dataset. Fetchers, model integrations, and the inclusion service are not implemented yet.
 
 The first milestone is to manually label 50 pilot samples and compare Jev with OpenAI Decisions using the same titles, descriptions, and tags. Record classification errors, cost, latency, and failures, then expand the evaluation dataset.
+
+## Experiment store
+
+The `gleaner` command (Python 3.9+, standard library only) imports candidate aids, acquires title, description, and tags into immutable input snapshots, exports and imports human annotations as CSV, and writes verifiable data bundles. Experiment data lives in a data directory you choose explicitly, outside version control.
+
+```bash
+python -m gleaner --data-dir /path/outside/the/repo init
+python -m unittest discover -s tests -t .
+```
+
+See the [experiment store guide](docs/experiment-store.md) for the full workflow and an offline walkthrough with synthetic data.
 
 ## Documentation
 
 - [Inclusion and annotation criteria (Chinese)](docs/criteria.md)
 - [Dataset and evaluation plan (Chinese)](docs/evaluation.md)
-- [Synthetic sample format](examples/sample.json)
+- [Experiment store](docs/experiment-store.md)
+- [Synthetic sample format](examples/sample.json) and [synthetic acquisition fixtures](examples/synthetic/)
 
 ## System boundaries
 
