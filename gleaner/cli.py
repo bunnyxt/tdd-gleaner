@@ -13,6 +13,7 @@ from .annotations import export_annotations, import_annotations
 from .bundle import export_bundle, restore_bundle, verify_bundle, verify_store
 from .store import StoreError, init_store, open_store, resolve_data_dir
 from .util import parse_aid
+from . import evalcli
 
 
 ENDPOINTS_CONFIG_ENV = "GLEANER_ENDPOINTS_CONFIG"
@@ -84,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("verify-bundle", help="check a bundle's manifest hashes without restoring it")
     p.add_argument("bundle", type=Path)
+
+    evalcli.add_parsers(sub)
     return parser
 
 
@@ -92,6 +95,8 @@ def run(args) -> int:
         problems = verify_bundle(args.bundle)
         _print({"bundle": str(args.bundle), "problems": problems})
         return 1 if problems else 0
+    if args.command in evalcli.COMMANDS:
+        return evalcli.run(args)
 
     data_dir = resolve_data_dir(args.data_dir, allow_git=args.allow_git_dir)
 
