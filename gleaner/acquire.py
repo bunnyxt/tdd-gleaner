@@ -81,9 +81,10 @@ def import_candidates(store: Store, path: Path, default_source: Optional[str], c
 def acquisition_state(store: Store, acquisition_id: int, max_attempts: int) -> Dict[str, object]:
     """Summarise an acquisition: per-endpoint latest attempt and overall state.
 
-    States: ``complete`` (snapshot exists), ``retryable`` (no terminal failure
-    and some endpoint still has attempts left), ``failed`` (terminal failure
-    or attempts exhausted), ``incomplete`` (endpoints not attempted yet).
+    States: ``complete`` (snapshot exists), ``failed`` (terminal failure, or
+    retryable failures with no attempts left), ``retryable`` (a retryable
+    failure with attempts left), ``incomplete`` (no failure, but an endpoint
+    has not been attempted yet, e.g. after the request budget ran out).
     """
     conn = store.conn
     snap = conn.execute("SELECT snapshot_id FROM snapshot WHERE acquisition_id = ?", (acquisition_id,)).fetchone()
@@ -98,12 +99,13 @@ def acquisition_state(store: Store, acquisition_id: int, max_attempts: int) -> D
         state = "complete"
     elif any(r is not None and r["status"] in ("unavailable", "invalid_response") for r in endpoints.values()):
         state = "failed"
+    elif any(r is not None and r["status"] == "retryable_error" for r in endpoints.values()):
+        left = any(r is not None and r["status"] == "retryable_error" and r["attempt_no"] < max_attempts for r in endpoints.values())
+        state = "retryable" if left else "failed"
     elif any(r is None for r in endpoints.values()):
         state = "incomplete"
-    elif all(r["status"] == "ok" or r["attempt_no"] >= max_attempts for r in endpoints.values()):
-        state = "failed"
-    else:
-        state = "retryable"
+    else:  # pragma: no cover - two ok attempts always produce a snapshot
+        state = "complete"
     return {"state": state, "endpoints": endpoints, "snapshot_id": snap["snapshot_id"] if snap else None}
 
 
@@ -118,6 +120,19 @@ class FetchReport:
         self.outcomes: List[Dict[str, object]] = []
         self.skipped: List[Dict[str, object]] = []
         self.budget_exhausted = False
+        self.stop_reason: Optional[str] = None  # "budget_exhausted" or "rate_limited:<signal>"
+        self.stopped_at: Optional[Dict[str, object]] = None
+
+    @property
+    def stopped(self) -> bool:
+        return self.stop_reason is not None
+
+    def stop(self, reason: str, **where: object) -> None:
+        if self.stop_reason is None:
+            self.stop_reason = reason
+            self.stopped_at = dict(where) or None
+        if reason == "budget_exhausted":
+            self.budget_exhausted = True
 
     def as_dict(self) -> Dict[str, object]:
         return {
@@ -126,6 +141,8 @@ class FetchReport:
             "attempts": self.outcomes,
             "skipped": self.skipped,
             "budget_exhausted": self.budget_exhausted,
+            "stop_reason": self.stop_reason,
+            "stopped_at": self.stopped_at,
         }
 
 
@@ -157,8 +174,10 @@ class Fetcher:
 
     # A request is only made when the budget allows it.
     def _request(self, endpoint: str, aid: int) -> Optional[tuple]:
+        if self.report.stopped:
+            return None
         if self.report.requests >= self.max_requests:
-            self.report.budget_exhausted = True
+            self.report.stop("budget_exhausted")
             return None
         if self.report.requests > 0 and self.delay > 0:
             self.sleep(self.delay)
@@ -199,6 +218,9 @@ class Fetcher:
             "status": classified.status, "error_class": classified.error_class,
             "http_status": response.http_status, "api_code": classified.api_code,
         })
+        limited = bilibili.rate_limit_reason(response.http_status, classified.api_code)
+        if limited is not None:
+            self.report.stop(f"rate_limited:{limited}", aid=aid, endpoint=endpoint, attempt_no=attempt_no)
         return classified.status
 
     def _new_acquisition(self, aid: int, reason: str) -> int:
@@ -215,7 +237,12 @@ class Fetcher:
             latest = state["endpoints"][endpoint]
             if latest is not None and (latest["status"] == "ok" or latest["attempt_no"] >= self.max_attempts):
                 continue
-            if self._attempt(acquisition_id, aid, endpoint) is None:
+            if endpoint == "tags":
+                view = state["endpoints"]["view"]
+                if view is None or view["status"] != "ok":
+                    break  # tags are only requested once view has succeeded
+            status = self._attempt(acquisition_id, aid, endpoint)
+            if status is None or status != "ok" or self.report.stopped:
                 break
         snapshot_id = make_snapshot(self.store, acquisition_id, self.clock)
         if snapshot_id:
@@ -231,7 +258,7 @@ class Fetcher:
         Failed acquisitions are left alone; use :meth:`refresh` to start over.
         """
         for aid in aids:
-            if self.report.budget_exhausted:
+            if self.report.stopped:
                 break
             latest = _latest_acquisition(self.store, aid)
             if latest is None:
@@ -247,8 +274,10 @@ class Fetcher:
     def refresh(self, aids: Iterable[int]) -> FetchReport:
         """Start a new ``refresh`` acquisition. Earlier snapshots are kept."""
         for aid in aids:
+            if self.report.stopped:
+                break
             if self.report.requests >= self.max_requests:
-                self.report.budget_exhausted = True
+                self.report.stop("budget_exhausted")
                 break
             self.run_acquisition(aid, self._new_acquisition(aid, "refresh"))
         return self.report
@@ -283,7 +312,11 @@ def make_snapshot(store: Store, acquisition_id: int, clock: Clock = utc_now) -> 
 
 
 def candidate_aids(store: Store, only: Optional[Sequence[int]] = None) -> List[int]:
-    rows = store.conn.execute("SELECT aid FROM candidate ORDER BY first_seen_at, aid").fetchall()
+    # Candidates keep the order in which they were first imported (the first
+    # discovery row), so fixed sample lists and their substitutes keep their order.
+    rows = store.conn.execute(
+        "SELECT c.aid FROM candidate c JOIN discovery d ON d.aid = c.aid GROUP BY c.aid ORDER BY MIN(d.id)"
+    ).fetchall()
     aids = [r["aid"] for r in rows]
     if only:
         known = set(aids)

@@ -9,7 +9,8 @@ A bundle is a self-contained directory::
     fetch_attempts.jsonl every attempt, including failures
     snapshots.jsonl      every snapshot with its exact model input string
     annotations.jsonl    every annotation revision
-    dataset.jsonl        latest snapshot per aid with its latest annotation revision
+    dataset.jsonl        latest snapshot per aid with its discoveries (source, locator,
+                         sample group) and latest annotation revision
 
 Restore checks every file against the manifest, then runs the store checks
 (database integrity, raw file hashes, snapshot input hashes).
@@ -95,7 +96,9 @@ def jsonl_views(conn: sqlite3.Connection) -> Dict[str, List[dict]]:
         s = latest_snap[aid]
         a = latest_ann.get(s["snapshot_id"])
         dataset.append({
-            "aid": aid, "snapshot_id": s["snapshot_id"], "input_schema_version": s["input_schema_version"],
+            "aid": aid,
+            "discoveries": [{"source": d["source"], "locator": d["locator"], "sample_group": d["sample_group"]} for d in discoveries.get(aid, [])],
+            "snapshot_id": s["snapshot_id"], "input_schema_version": s["input_schema_version"],
             "input_sha256": s["input_sha256"], "input": s["input_text"],
             "annotation_revision": a["revision"] if a else None,
             "rules_version": a["rules_version"] if a else None,

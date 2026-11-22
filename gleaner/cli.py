@@ -63,7 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "fetch":
             p.add_argument("--retry", action="store_true", help="also retry acquisitions with retryable failures")
 
-    sub.add_parser("status", help="summarise candidates, attempts, snapshots, and annotations")
+    p = sub.add_parser("status", help="summarise candidates, attempts, snapshots, and annotations")
+    p.add_argument("--max-attempts", type=int, default=2, help="attempts per endpoint used to judge retryable vs failed (default 2)")
     sub.add_parser("verify", help="check database integrity, raw hashes, and snapshot inputs")
 
     p = sub.add_parser("export-annotations", help="write an annotation CSV")
@@ -113,7 +114,7 @@ def run(args) -> int:
                 report = fetcher.refresh(candidate_aids(store, _aids(args.aid)))
             _print(report.as_dict())
         elif args.command == "status":
-            _print(status_summary(store))
+            _print(status_summary(store, args.max_attempts))
         elif args.command == "verify":
             problems = verify_store(store)
             _print({"problems": problems})

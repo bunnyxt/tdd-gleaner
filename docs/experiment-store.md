@@ -24,7 +24,7 @@ gleaner --data-dir DIR init
 gleaner --data-dir DIR import-candidates candidates.csv [--source NAME]
 gleaner --data-dir DIR fetch --max-requests 20 [--retry] [--aid AID ...]
 gleaner --data-dir DIR refresh --aid AID --max-requests 2
-gleaner --data-dir DIR status
+gleaner --data-dir DIR status [--max-attempts N]
 gleaner --data-dir DIR export-annotations labels.csv
 gleaner --data-dir DIR import-annotations labels.csv --rules-version RULES [--annotator NAME]
 gleaner --data-dir DIR verify
@@ -37,7 +37,7 @@ Run it as `python -m gleaner` from a checkout, or install the package to get the
 
 ### Candidates
 
-The candidate CSV needs an `aid` column. Optional columns are `source`, `locator` (a URL or query), `sample_group`, and any number of `observed_*` columns for statistics seen at sampling time. Candidates are de-duplicated by aid, and every distinct discovery row is kept, so the same video found by two sources has one candidate and two discoveries. Importing an identical row again changes nothing. Discovery data is never part of the model input.
+The candidate CSV needs an `aid` column. Optional columns are `source`, `locator` (a URL or query), `sample_group`, and any number of `observed_*` columns for statistics seen at sampling time. Candidates are de-duplicated by aid, and every distinct discovery row is kept, so the same video found by two sources has one candidate and two discoveries. Importing an identical row again changes nothing. Candidates are acquired in the order they were first imported, so a fixed sample list and its substitutes keep their order. Discovery data is never part of the model input.
 
 ### Acquisition
 
@@ -52,11 +52,12 @@ Each acquisition requests the `view` endpoint and then the `tags` endpoint. Ever
 
 None of these failure statuses says anything about the content labels.
 
-A snapshot is created only when both endpoints have an `ok` attempt in the same acquisition. A successful empty description `""` or empty tag list `[]` is valid. A terminal `view` failure skips the `tags` request.
+A snapshot is created only when both endpoints have an `ok` attempt in the same acquisition. A successful empty description `""` or empty tag list `[]` is valid. `tags` is requested only after `view` has succeeded in that acquisition, so any `view` failure skips the `tags` request in that round.
 
 - `fetch` acquires candidates that have no snapshot. Acquisitions interrupted by the request budget resume automatically. With `--retry`, acquisitions with retryable failures request only the failed endpoints again, up to `--max-attempts` per endpoint (default 2). Each retry records the attempt it retries.
 - `refresh` starts a new acquisition for the given aids. A successful refresh creates a new snapshot. Earlier snapshots and their annotations are kept, and a failed refresh never borrows fields from an earlier acquisition.
-- `--max-requests` is a hard cap on endpoint requests for the run, and `--delay` sets the pause between requests (default 1 second). `status` reports the total number of requests recorded.
+- `--max-requests` is a hard cap on endpoint requests for the run, and `--delay` sets the pause between requests (default 1 second). `status` reports the total number of requests recorded. Pass `status` the same `--max-attempts` as `fetch` so it judges retryable and failed acquisitions the same way.
+- **Rate limits stop the run.** HTTP 412 or 429, or business code -412 or -352, ends the whole `fetch` or `refresh` run immediately, including runs with `--retry`. The limited attempt is stored as `retryable_error` like any other, and the report gives `stop_reason` (for example `rate_limited:http_412`) and `stopped_at`. The list of signals is defined in one place (`RATE_LIMIT_HTTP_STATUSES` and `RATE_LIMIT_CODES` in `gleaner/bilibili.py`). Running out of `--max-requests` reports `stop_reason: budget_exhausted`.
 
 ### Workers and User-Agent
 
@@ -80,6 +81,8 @@ Values are used as returned: no cleaning, truncation, or tag de-duplication. The
 ### Annotation
 
 `export-annotations` writes a UTF-8 CSV with one row per snapshot (the latest snapshot per aid; `--all-snapshots` for all of them).
+
+Edit the file as plain text, or import every column as text. Spreadsheet programs such as Excel may save long aids in scientific notation, and those rows are then rejected.
 
 | Column | Editable | Values |
 | --- | --- | --- |
@@ -107,7 +110,7 @@ Values are used as returned: no cleaning, truncation, or tag de-duplication. The
 | `fetch_attempts.jsonl` | Every attempt, failures included |
 | `snapshots.jsonl` | Every snapshot with its exact input string and hash |
 | `annotations.jsonl` | Every annotation revision |
-| `dataset.jsonl` | Latest snapshot per aid with its latest annotation revision |
+| `dataset.jsonl` | Latest snapshot per aid with its discoveries (source, locator, sample group) and latest annotation revision |
 
 `verify-bundle` checks the manifest hashes and looks for unlisted files. `restore-bundle` does the same, copies the bundle into an empty data directory, and runs `verify` on the result. `verify` checks database integrity, raw file hashes, and that every snapshot's input string matches its stored hash.
 

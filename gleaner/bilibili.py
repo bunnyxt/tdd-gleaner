@@ -40,6 +40,10 @@ UNAVAILABLE_CODES = {
     "tags": set(),
 }
 
+# Signals that the platform is limiting requests. Any of them stops the whole
+# run immediately; the attempt itself is still stored as retryable_error.
+RATE_LIMIT_HTTP_STATUSES = {412, 429}
+RATE_LIMIT_CODES = {-412, -352}
 
 
 class Response(NamedTuple):
@@ -60,6 +64,15 @@ class Classified(NamedTuple):
     error_detail: Optional[str]
     api_code: Optional[int]
     extracted: Optional[Dict[str, Any]]
+
+
+def rate_limit_reason(http_status: Optional[int], api_code: Optional[int]) -> Optional[str]:
+    """Return a stop reason such as ``http_412`` or ``code_-352``, or None."""
+    if http_status in RATE_LIMIT_HTTP_STATUSES:
+        return f"http_{http_status}"
+    if api_code in RATE_LIMIT_CODES:
+        return f"code_{api_code}"
+    return None
 
 
 def endpoint_url(endpoint: str, aid: int) -> str:

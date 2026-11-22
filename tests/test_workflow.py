@@ -2,9 +2,11 @@ import contextlib
 import csv
 import io
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from gleaner import bilibili
@@ -96,8 +98,9 @@ class StoreTestCase(unittest.TestCase):
 
 class DataDirTests(unittest.TestCase):
     def test_requires_explicit_data_dir(self):
-        with self.assertRaises(StoreError):
-            resolve_data_dir(None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(StoreError):
+                resolve_data_dir(None)
 
     def test_refuses_git_work_tree(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -219,17 +222,25 @@ class SnapshotTests(StoreTestCase):
         t = ScriptedTransport()
         t.add("view", 10, ok(json.dumps({"code": -404, "message": "x"}).encode()))
         t.add("view", 11, bilibili.Response(403, b'{"code":-403}'))
-        t.add("tags", 11, ok(tags_body(["x"])))
-        t.add("view", 12, ok(json.dumps({"code": -412, "message": "blocked"}).encode()))
-        t.add("tags", 12, bilibili.Response(None, None, "timeout"))
-        self.fetcher(t).fetch([10, 11, 12], retry=False)
+        t.add("view", 12, ok(json.dumps({"code": -500, "message": "server"}).encode()))
+        report = self.fetcher(t).fetch([10, 11, 12], retry=False)
+        self.assertIsNone(report.stop_reason)
         self.assertEqual([(a["status"], a["api_code"]) for a in self.attempts(10)], [("unavailable", -404)])
         self.assertEqual([(a["endpoint"], a["status"], a["http_status"]) for a in self.attempts(11)],
-                         [("view", "retryable_error", 403), ("tags", "ok", 200)])
-        a12 = self.attempts(12)
-        self.assertEqual([(a["status"], a["error_class"], a["api_code"]) for a in a12],
-                         [("retryable_error", "api_code", -412), ("retryable_error", "transport", None)])
-        self.assertIsNone(a12[1]["raw_path"])
+                         [("view", "retryable_error", 403)])
+        self.assertEqual([(a["status"], a["error_class"], a["api_code"]) for a in self.attempts(12)],
+                         [("retryable_error", "api_code", -500)])
+        # A retryable view failure means tags are not requested in that round.
+        self.assertEqual(t.calls, [("view", 10), ("view", 11), ("view", 12)])
+        self.assertEqual(status_summary(self.store)["latest_acquisition_states"], {"failed": 1, "retryable": 2})
+
+    def test_transport_error_has_no_raw_file(self):
+        self.import_aids(13)
+        t = ScriptedTransport()
+        t.add("view", 13, bilibili.Response(None, None, "timeout"))
+        self.fetcher(t).fetch([13], retry=False)
+        attempt = self.attempts(13)[0]
+        self.assertEqual((attempt["status"], attempt["error_class"], attempt["raw_path"]), ("retryable_error", "transport", None))
 
     def test_partial_failure_is_kept_and_retry_completes_same_acquisition(self):
         self.import_aids(20)
@@ -321,6 +332,78 @@ class SnapshotTests(StoreTestCase):
         rel = self.attempts(60)[0]["raw_path"]
         (self.data / rel).write_bytes(view_body(60, title="改"))
         self.assertTrue(any("hash mismatch" in p for p in verify_store(self.store)))
+
+
+class OrderAndRateLimitTests(StoreTestCase):
+    def test_candidates_keep_import_order(self):
+        path = self.write_csv("c.csv", ["aid", "source"], [[300, "a"], [100, "a"], [200, "a"], [100, "b"]])
+        import_candidates(self.store, path, None, self.clock)
+        self.import_aids(50)
+        self.assertEqual(candidates_without_snapshot(self.store), [300, 100, 200, 50])
+        t = ScriptedTransport()
+        self.fetcher(t, max_requests=3).fetch(candidates_without_snapshot(self.store), retry=False)
+        self.assertEqual(t.calls, [("view", 300), ("view", 100), ("view", 200)])
+
+    def always(self, response):
+        class Always:
+            calls = []
+
+            def __call__(self, endpoint, aid):
+                self.calls.append((endpoint, aid))
+                return response
+        return Always()
+
+    def test_rate_limit_stops_the_run(self):
+        cases = [
+            (bilibili.Response(412, b'{"code":-412,"message":"request was banned"}'), "rate_limited:http_412"),
+            (bilibili.Response(429, b""), "rate_limited:http_429"),
+            (ok(json.dumps({"code": -412}).encode()), "rate_limited:code_-412"),
+            (ok(json.dumps({"code": -352}).encode()), "rate_limited:code_-352"),
+        ]
+        for index, (response, reason) in enumerate(cases):
+            aids = [1000 + index * 10 + k for k in range(3)]
+            self.import_aids(*aids)
+            t = self.always(response)
+            report = self.fetcher(t).fetch(aids, retry=False)
+            self.assertEqual(report.stop_reason, reason)
+            self.assertEqual(report.stopped_at, {"aid": aids[0], "endpoint": "view", "attempt_no": 1})
+            self.assertEqual(t.calls, [("view", aids[0])])
+            attempt = self.attempts(aids[0])[0]
+            self.assertEqual(attempt["status"], "retryable_error")
+            if response.body:
+                self.assertIsNotNone(attempt["raw_sha256"])
+
+    def test_rate_limit_on_tags_and_under_retry(self):
+        self.import_aids(1, 2)
+        t = ScriptedTransport()
+        t.add("view", 1, ok(view_body(1)))
+        t.add("tags", 1, bilibili.Response(412, b"x"))
+        report = self.fetcher(t).fetch([1, 2], retry=False)
+        self.assertEqual((report.stop_reason, report.requests), ("rate_limited:http_412", 2))
+        self.assertNotIn(("view", 2), t.calls)
+        # --retry obeys the same rule: the first limited response stops the run.
+        t2 = self.always(ok(json.dumps({"code": -352}).encode()))
+        report = self.fetcher(t2).fetch(candidates_without_snapshot(self.store), retry=True)
+        self.assertEqual(report.stop_reason, "rate_limited:code_-352")
+        self.assertEqual(t2.calls, [("tags", 1)])
+        # refresh too.
+        t3 = self.always(bilibili.Response(429, b""))
+        report = self.fetcher(t3).refresh([1, 2])
+        self.assertEqual((report.stop_reason, t3.calls), ("rate_limited:http_429", [("view", 1)]))
+
+    def test_budget_stop_reason(self):
+        self.import_aids(3)
+        report = self.fetcher(ScriptedTransport(), max_requests=0).fetch([3], retry=False)
+        self.assertEqual((report.stop_reason, report.budget_exhausted, report.requests), ("budget_exhausted", True, 0))
+
+    def test_status_uses_max_attempts(self):
+        self.import_aids(4)
+        t = ScriptedTransport()
+        t.add("view", 4, bilibili.Response(503, b""), bilibili.Response(503, b""))
+        self.fetcher(t).fetch([4], retry=False)
+        self.fetcher(t).fetch([4], retry=True)
+        self.assertEqual(status_summary(self.store, 2)["latest_acquisition_states"], {"failed": 1})
+        self.assertEqual(status_summary(self.store, 3)["latest_acquisition_states"], {"retryable": 1})
 
 
 class AnnotationTests(StoreTestCase):
@@ -450,8 +533,7 @@ class BundleTests(StoreTestCase):
         t = ScriptedTransport()
         t.add("view", 1, ok(view_body(1)))
         t.add("tags", 1, ok(tags_body(["声库"])))
-        t.add("view", 2, bilibili.Response(412, b"blocked"))
-        t.add("tags", 2, bilibili.Response(None, None, "timeout"))
+        t.add("view", 2, bilibili.Response(503, b"unavailable"))
         t.add("view", 3, ok(json.dumps({"code": -404}).encode()))
         self.fetcher(t).fetch([1, 2, 3], retry=False)
         path = self.root / "labels.csv"
@@ -470,13 +552,14 @@ class BundleTests(StoreTestCase):
         self.populate()
         bundle = self.root / "bundle"
         result = export_bundle(self.store, bundle, clock=self.clock)
-        self.assertEqual(result["counts"], {"candidates": 3, "fetch_attempts": 5, "snapshots": 1, "annotations": 1, "dataset": 1, "raw_files": 4})
+        self.assertEqual(result["counts"], {"candidates": 3, "fetch_attempts": 4, "snapshots": 1, "annotations": 1, "dataset": 1, "raw_files": 4})
         self.assertEqual(verify_bundle(bundle), [])
         attempts = [json.loads(l) for l in (bundle / "fetch_attempts.jsonl").read_text(encoding="utf-8").splitlines()]
-        self.assertEqual(sorted(a["status"] for a in attempts), ["ok", "ok", "retryable_error", "retryable_error", "unavailable"])
+        self.assertEqual(sorted(a["status"] for a in attempts), ["ok", "ok", "retryable_error", "unavailable"])
         self.assertEqual({a["status"] for a in attempts}, {"ok", "retryable_error", "unavailable"})
         dataset = [json.loads(l) for l in (bundle / "dataset.jsonl").read_text(encoding="utf-8").splitlines()]
         self.assertEqual(dataset[0]["annotation_revision"], 1)
+        self.assertEqual(dataset[0]["discoveries"], [{"source": "test", "locator": "", "sample_group": ""}])
         self.assertIsNone(dataset[0]["is_vocal_work"])
         self.assertEqual(dataset[0]["input_sha256"], input_sha256(dataset[0]["input"]))
 
@@ -485,7 +568,7 @@ class BundleTests(StoreTestCase):
         self.assertTrue(out["verified"])
         with open_store(restored) as store:
             self.assertEqual(verify_store(store), [])
-            self.assertEqual(status_summary(store)["endpoint_requests"], 5)
+            self.assertEqual(status_summary(store)["endpoint_requests"], 4)
         with self.assertRaises(StoreError):
             restore_bundle(bundle, restored)  # target not empty
 
