@@ -1,0 +1,14 @@
+{
+  "view": {
+    "workers": [
+      {"id": "<worker-id>", "url": "<worker-url>", "weight": 1, "enabled": true}
+    ],
+    "user_agents": ["<user-agent>"]
+  },
+  "tags": {
+    "workers": [
+      {"id": "<worker-id>", "url": "<worker-url>", "weight": 1, "enabled": true}
+    ],
+    "user_agents": ["<user-agent>"]
+  }
+}

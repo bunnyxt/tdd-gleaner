@@ -3,3 +3,7 @@
 
 # Local credentials
 .env
+
+# Python
+__pycache__/
+*.egg-info/
