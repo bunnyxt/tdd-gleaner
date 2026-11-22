@@ -20,11 +20,13 @@ None of these failure statuses is a content label.
 """
 
 import json
+import random
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, NamedTuple, Optional
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
 ENDPOINTS = {
     "view": "https://api.bilibili.com/x/web-interface/view",
@@ -38,18 +40,17 @@ UNAVAILABLE_CODES = {
     "tags": set(),
 }
 
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"
-)
 
 
 class Response(NamedTuple):
     http_status: Optional[int]
     body: Optional[bytes]
     error: Optional[str] = None  # transport error description, if any
+    via: str = "direct"  # "direct", a worker id, or "fixture"
+    user_agent: Optional[str] = None
 
 
+# A transport takes (endpoint, aid) and returns the response.
 Transport = Callable[[str, int], Response]
 
 
@@ -128,22 +129,125 @@ def _extract_tags(data: Any) -> Classified:
     return Classified("ok", None, None, 0, {"tags": names})
 
 
-def http_transport(timeout: float = 10.0, user_agent: str = DEFAULT_USER_AGENT) -> Transport:
-    """A plain unauthenticated HTTPS transport. No cookies or credentials are sent."""
+class ConfigError(ValueError):
+    pass
 
-    def fetch(url: str, aid: int) -> Response:
-        request = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
+
+class Worker(NamedTuple):
+    id: str
+    url: str
+    weight: int
+
+
+class EndpointConfig(NamedTuple):
+    workers: List[Worker]  # empty: request the public endpoint directly
+    user_agents: List[str]  # empty: send the HTTP library's default
+
+
+def load_endpoints_config(path: Path) -> Dict[str, EndpointConfig]:
+    """Load the private endpoints configuration.
+
+    Format (one entry per endpoint, both entries optional)::
+
+        {
+          "view": {
+            "workers": [{"id": "view-1", "url": "https://...", "weight": 1, "enabled": true}],
+            "user_agents": ["..."]
+          },
+          "tags": {...}
+        }
+
+    A worker receives the same query string as the public endpoint and must
+    return the public endpoint's response unchanged. Worker URLs are never
+    stored or printed; attempts record the worker id instead.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ConfigError(f"cannot read endpoints config: {type(exc).__name__}") from None
+    if not isinstance(raw, dict):
+        raise ConfigError("endpoints config must be a JSON object")
+    unknown = set(raw) - set(ENDPOINTS)
+    if unknown:
+        raise ConfigError(f"unknown endpoints in config: {', '.join(sorted(unknown))}")
+    result = {}
+    for endpoint in ENDPOINTS:
+        entry = raw.get(endpoint, {})
+        if not isinstance(entry, dict) or set(entry) - {"workers", "user_agents"}:
+            raise ConfigError(f"{endpoint}: expected an object with 'workers' and/or 'user_agents'")
+        workers = []
+        for index, item in enumerate(entry.get("workers", [])):
+            where = f"{endpoint}.workers[{index}]"
+            if not isinstance(item, dict) or set(item) - {"id", "url", "weight", "enabled"}:
+                raise ConfigError(f"{where}: expected id, url, weight, enabled")
+            if not isinstance(item.get("id"), str) or not item["id"]:
+                raise ConfigError(f"{where}: id must be a non-empty string")
+            url = item.get("url")
+            if not isinstance(url, str) or urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+                raise ConfigError(f"{where}: url must be an http(s) URL")
+            weight = item.get("weight", 1)
+            if isinstance(weight, bool) or not isinstance(weight, int) or weight <= 0:
+                raise ConfigError(f"{where}: weight must be a positive integer")
+            if item.get("enabled", True) is True:
+                workers.append(Worker(item["id"], url, weight))
+            elif item.get("enabled") is not False:
+                raise ConfigError(f"{where}: enabled must be a boolean")
+        if entry.get("workers") and not workers:
+            raise ConfigError(f"{endpoint}: no enabled worker")
+        agents = entry.get("user_agents", [])
+        if not isinstance(agents, list) or not all(isinstance(a, str) and a for a in agents):
+            raise ConfigError(f"{endpoint}: user_agents must be a list of non-empty strings")
+        result[endpoint] = EndpointConfig(workers, list(agents))
+    return result
+
+
+def _scrub(text: str, secrets: List[str]) -> str:
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "<worker>")
+    return text
+
+
+def http_transport(
+    config: Optional[Dict[str, EndpointConfig]] = None,
+    timeout: float = 10.0,
+    rng: Optional[random.Random] = None,
+    opener: Callable = urllib.request.urlopen,
+) -> Transport:
+    """Unauthenticated HTTP transport. No cookies or credentials are sent.
+
+    For each request a worker is drawn by weight and a User-Agent is drawn
+    uniformly from the endpoint's configuration. Without workers the public
+    endpoint is requested directly.
+    """
+    config = config or {name: EndpointConfig([], []) for name in ENDPOINTS}
+    rng = rng or random.Random()
+
+    def fetch(endpoint: str, aid: int) -> Response:
+        entry = config.get(endpoint, EndpointConfig([], []))
+        if entry.workers:
+            worker = rng.choices(entry.workers, weights=[w.weight for w in entry.workers])[0]
+            base, via = worker.url, worker.id
+            secrets = [worker.url, urllib.parse.urlsplit(worker.url).netloc]
+        else:
+            base, via, secrets = ENDPOINTS[endpoint], "direct", []
+        user_agent = rng.choice(entry.user_agents) if entry.user_agents else None
+        separator = "&" if "?" in base else "?"
+        headers = {"Accept": "application/json"}
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        request = urllib.request.Request(f"{base}{separator}aid={aid}", headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as handle:
-                return Response(handle.status, handle.read())
+            with opener(request, timeout=timeout) as handle:
+                return Response(handle.status, handle.read(), None, via, user_agent)
         except urllib.error.HTTPError as exc:
             try:
                 body = exc.read()
             except Exception:  # pragma: no cover - defensive
                 body = None
-            return Response(exc.code, body)
+            return Response(exc.code, body, None, via, user_agent)
         except (urllib.error.URLError, socket.timeout, OSError) as exc:
-            return Response(None, None, f"{type(exc).__name__}: {exc}")
+            return Response(None, None, _scrub(f"{type(exc).__name__}: {exc}", secrets), via, user_agent)
 
     return fetch
 
@@ -154,13 +258,11 @@ def fixture_transport(directory: Path) -> Transport:
     A missing file is reported as a transport error, which lets fixtures
     simulate network failures.
     """
-    endpoint_by_url = {base: name for name, base in ENDPOINTS.items()}
 
-    def fetch(url: str, aid: int) -> Response:
-        endpoint = endpoint_by_url[url.split("?", 1)[0]]
+    def fetch(endpoint: str, aid: int) -> Response:
         path = directory / endpoint / f"{aid}.json"
         if not path.exists():
-            return Response(None, None, "fixture missing")
-        return Response(200, path.read_bytes())
+            return Response(None, None, "fixture missing", "fixture")
+        return Response(200, path.read_bytes(), None, "fixture")
 
     return fetch

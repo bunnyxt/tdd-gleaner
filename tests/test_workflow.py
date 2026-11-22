@@ -37,8 +37,7 @@ class ScriptedTransport:
     def add(self, endpoint, aid, *responses):
         self.queue.setdefault((endpoint, aid), []).extend(responses)
 
-    def __call__(self, url, aid):
-        endpoint = "view" if "/view" in url else "tags"
+    def __call__(self, endpoint, aid):
         self.calls.append((endpoint, aid))
         items = self.queue.get((endpoint, aid))
         if not items:
@@ -554,6 +553,109 @@ class SyntheticExampleTests(unittest.TestCase):
             self.assertEqual(cli("export-bundle", str(tmp / "bundle")), 0)
             self.assertEqual(cli("verify-bundle", str(tmp / "bundle"), data_dir=None), 0)
             self.assertEqual(cli("restore-bundle", str(tmp / "bundle"), data_dir=str(tmp / "restored")), 0)
+
+
+class FakeHandle:
+    def __init__(self, status, body):
+        self.status, self.body = status, body
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+WORKER_URL = "https://worker.invalid/secret-path"
+
+
+def write_config(directory, config):
+    path = Path(directory) / "endpoints.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    return path
+
+
+class WorkerTransportTests(StoreTestCase):
+    CONFIG = {
+        "view": {"workers": [{"id": "view-a", "url": WORKER_URL, "weight": 1, "enabled": True},
+                             {"id": "view-off", "url": "https://off.invalid/", "weight": 5, "enabled": False}],
+                 "user_agents": ["UA-1", "UA-2"]},
+        "tags": {"user_agents": ["UA-T"]},
+    }
+
+    def test_load_config_and_route_requests(self):
+        config = bilibili.load_endpoints_config(write_config(self.root, self.CONFIG))
+        self.assertEqual([w.id for w in config["view"].workers], ["view-a"])
+        seen = []
+
+        def opener(request, timeout):
+            seen.append((request.full_url, request.get_header("User-agent")))
+            if "worker.invalid" in request.full_url:
+                return FakeHandle(200, view_body(70))
+            return FakeHandle(200, tags_body(["x"]))
+
+        transport = bilibili.http_transport(config, opener=opener)
+        self.import_aids(70)
+        self.fetcher(transport).fetch([70], retry=False)
+        self.assertEqual(seen[0][0], WORKER_URL + "?aid=70")
+        self.assertIn(seen[0][1], ("UA-1", "UA-2"))
+        self.assertEqual(seen[1], ("https://api.bilibili.com/x/tag/archive/tags?aid=70", "UA-T"))
+        attempts = self.attempts(70)
+        self.assertEqual([(a["via"], a["url"]) for a in attempts], [
+            ("view-a", "https://api.bilibili.com/x/web-interface/view?aid=70"),
+            ("direct", "https://api.bilibili.com/x/tag/archive/tags?aid=70"),
+        ])
+        self.assertEqual(attempts[1]["user_agent"], "UA-T")
+        self.assertEqual(self.snapshot_ids(70), ["snap-70-1"])
+        bundle = self.root / "bundle"
+        export_bundle(self.store, bundle)
+        for path in bundle.rglob("*"):
+            if path.is_file():
+                self.assertNotIn(b"worker.invalid", path.read_bytes(), path.name)
+
+    def test_transport_errors_do_not_leak_worker_url(self):
+        config = bilibili.load_endpoints_config(write_config(self.root, self.CONFIG))
+
+        def opener(request, timeout):
+            raise OSError(f"cannot reach {request.full_url}")
+
+        response = bilibili.http_transport(config, opener=opener)("view", 1)
+        self.assertEqual(response.via, "view-a")
+        self.assertNotIn("worker.invalid", response.error)
+        self.assertNotIn("secret-path", response.error)
+
+    def test_invalid_configs(self):
+        bad = [
+            {"other": {}},
+            {"view": {"workers": [{"id": "", "url": WORKER_URL}]}},
+            {"view": {"workers": [{"id": "a", "url": "ftp://x"}]}},
+            {"view": {"workers": [{"id": "a", "url": WORKER_URL, "enabled": False}]}},
+            {"view": {"user_agents": ["", "x"]}},
+            {"view": {"workers": [{"id": "a", "url": WORKER_URL, "weight": 0}]}},
+        ]
+        for config in bad:
+            with self.assertRaises(bilibili.ConfigError, msg=config) as ctx:
+                bilibili.load_endpoints_config(write_config(self.root, config))
+            self.assertNotIn("secret-path", str(ctx.exception))
+
+    def test_cli_refuses_config_inside_git_work_tree(self):
+        repo = self.root / "repo"
+        (repo / ".git").mkdir(parents=True)
+        path = write_config(repo, self.CONFIG)
+        self.import_aids(71)
+        self._ctx.__exit__(None, None, None)
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
+                code = main(["--data-dir", str(self.data), "fetch", "--max-requests", "1", "--endpoints-config", str(path)])
+            self.assertEqual(code, 2)
+            self.assertIn("Git work tree", err.getvalue())
+        finally:
+            self._ctx = open_store(self.data)
+            self.store = self._ctx.__enter__()
+        self.assertEqual(self.attempts(71), [])
 
 
 class InputTests(unittest.TestCase):

@@ -164,7 +164,7 @@ class Fetcher:
             self.sleep(self.delay)
         url = bilibili.endpoint_url(endpoint, aid)
         started = self.clock()
-        response = self.transport(url, aid)
+        response = self.transport(endpoint, aid)
         finished = self.clock()
         self.report.requests += 1
         return url, started, finished, response
@@ -183,18 +183,19 @@ class Fetcher:
         attempt_no = previous["attempt_no"] + 1 if previous else 1
         with self.store.transaction() as conn:
             conn.execute(
-                "INSERT INTO fetch_attempt (acquisition_id, aid, endpoint, attempt_no, retry_of, url, started_at, finished_at,"
-                " status, error_class, error_detail, http_status, api_code, raw_path, raw_sha256, raw_size, extracted)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO fetch_attempt (acquisition_id, aid, endpoint, attempt_no, retry_of, url, via, user_agent,"
+                " started_at, finished_at, status, error_class, error_detail, http_status, api_code, raw_path, raw_sha256,"
+                " raw_size, extracted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    acquisition_id, aid, endpoint, attempt_no, previous["id"] if previous else None, url, started, finished,
+                    acquisition_id, aid, endpoint, attempt_no, previous["id"] if previous else None, url,
+                    response.via, response.user_agent, started, finished,
                     classified.status, classified.error_class, classified.error_detail, response.http_status,
                     classified.api_code, raw[0], raw[1], raw[2],
                     canonical_json(classified.extracted) if classified.extracted is not None else None,
                 ),
             )
         self.report.outcomes.append({
-            "aid": aid, "acquisition_id": acquisition_id, "endpoint": endpoint, "attempt_no": attempt_no,
+            "aid": aid, "acquisition_id": acquisition_id, "endpoint": endpoint, "attempt_no": attempt_no, "via": response.via,
             "status": classified.status, "error_class": classified.error_class,
             "http_status": response.http_status, "api_code": classified.api_code,
         })

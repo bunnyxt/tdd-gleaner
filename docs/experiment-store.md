@@ -58,6 +58,15 @@ A snapshot is created only when both endpoints have an `ok` attempt in the same 
 - `refresh` starts a new acquisition for the given aids. A successful refresh creates a new snapshot. Earlier snapshots and their annotations are kept, and a failed refresh never borrows fields from an earlier acquisition.
 - `--max-requests` is a hard cap on endpoint requests for the run, and `--delay` sets the pause between requests (default 1 second). `status` reports the total number of requests recorded.
 
+### Workers and User-Agent
+
+By default, requests go directly to the public endpoints with the HTTP library's default User-Agent. To route them through proxy workers and choose User-Agent values, pass a private configuration file with `--endpoints-config` or `GLEANER_ENDPOINTS_CONFIG`. See [`examples/endpoints.example.json`](../examples/endpoints.example.json) for the format. Both endpoints are optional, and an endpoint without workers is requested directly.
+
+- A worker receives the same query string (`?aid=...`) and the `User-Agent` header, and must return the public endpoint's response unchanged. A worker that trims the response cannot produce snapshots.
+- For each request, one enabled worker is drawn by weight and one User-Agent is drawn uniformly from the list.
+- Attempts record the public endpoint URL, the worker id (or `direct`), and the User-Agent sent. Worker URLs are never stored, exported, or printed.
+- Keep the configuration outside version control. The tool refuses to read one inside a Git work tree.
+
 ### Model input, version `v1`
 
 The model input is one UTF-8 JSON string with exactly `title`, `desc`, and `tags`, in that order, with compact separators and no escaping of non-ASCII text:

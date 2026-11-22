@@ -23,7 +23,7 @@ from .util import sha256_bytes
 DB_NAME = "gleaner.sqlite"
 RAW_DIR = "raw"
 LOCK_NAME = ".lock"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DATA_DIR_ENV = "GLEANER_DATA_DIR"
 
 
@@ -69,6 +69,8 @@ CREATE TABLE fetch_attempt (
     attempt_no INTEGER NOT NULL,
     retry_of INTEGER REFERENCES fetch_attempt(id),
     url TEXT NOT NULL,
+    via TEXT NOT NULL,
+    user_agent TEXT,
     started_at TEXT NOT NULL,
     finished_at TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('ok', 'retryable_error', 'unavailable', 'invalid_response')),

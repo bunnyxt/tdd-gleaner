@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -12,6 +13,9 @@ from .annotations import export_annotations, import_annotations
 from .bundle import export_bundle, restore_bundle, verify_bundle, verify_store
 from .store import StoreError, init_store, open_store, resolve_data_dir
 from .util import parse_aid
+
+
+ENDPOINTS_CONFIG_ENV = "GLEANER_ENDPOINTS_CONFIG"
 
 
 def _print(value) -> None:
@@ -25,7 +29,13 @@ def _aids(values: Optional[List[str]]) -> Optional[List[int]]:
 def _transport(args):
     if args.fixtures:
         return bilibili.fixture_transport(Path(args.fixtures))
-    return bilibili.http_transport(timeout=args.timeout)
+    config_path = args.endpoints_config or os.environ.get(ENDPOINTS_CONFIG_ENV)
+    config = None
+    if config_path:
+        path = Path(config_path).expanduser().resolve()
+        resolve_data_dir(str(path.parent))  # the private config must live outside Git work trees
+        config = bilibili.load_endpoints_config(path)
+    return bilibili.http_transport(config, timeout=args.timeout)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--delay", type=float, default=1.0, help="seconds between requests (default 1.0)")
         p.add_argument("--max-attempts", type=int, default=2, help="attempts per endpoint per acquisition (default 2)")
         p.add_argument("--timeout", type=float, default=10.0, help="HTTP timeout in seconds")
+        p.add_argument("--endpoints-config", help=f"private workers and User-Agent config (or set {ENDPOINTS_CONFIG_ENV})")
         p.add_argument("--fixtures", help="serve responses from <dir>/<endpoint>/<aid>.json instead of the network")
         if name == "fetch":
             p.add_argument("--retry", action="store_true", help="also retry acquisitions with retryable failures")
