@@ -8,7 +8,7 @@ tdd-gleaner 是[天钿 Daily](https://tdd.bunnyxt.com)（TDD）的视频发现�
 
 ## 当前阶段
 
-项目处于评测阶段，目前有收录规则、评测计划、虚构示例，以及用于构建评测数据集的离线实验资料库；fetcher、模型接入与收录服务尚未实现。
+项目处于评测阶段，目前有收录规则、评测计划、虚构示例，用于构建评测数据集的离线实验资料库，以及用于比较模型的评测工具。评测工具只用虚构响应测试过，尚未进行真实模型评测；fetcher 与收录服务尚未实现。
 
 第一个里程碑是人工试标 50 条样本，并用相同的标题、简介和标签比较 Jev 与 OpenAI Decisions，记录分类错误、费用、延迟和失败情况，随后扩充评测数据集。
 
@@ -23,11 +23,16 @@ python -m unittest discover -s tests -t .
 
 完整流程与使用虚构数据的离线演示见[实验资料库说明（英文）](docs/experiment-store.md)。
 
+## 评测工具
+
+同一命令可生成带哈希、开发集与验收集划分固定的数据集清单；把每个快照发给 Jev 和 OpenAI Decisions，一次请求同时问两个问题；保存每次尝试的请求、响应、用量、耗时和错误；达到预设的调用次数或费用上限即停止；并在本地计算阈值和报告。见[评测工具说明（英文）](docs/evaluation-harness.md)。
+
 ## 文档
 
 - [收录与标注规则](docs/criteria.md)
 - [数据集与评测计划](docs/evaluation.md)
 - [实验资料库（英文）](docs/experiment-store.md)
+- [评测工具（英文）](docs/evaluation-harness.md)
 - [虚构样本格式](examples/sample.json)与[虚构资料获取样例](examples/synthetic/)
 
 ## 系统边界

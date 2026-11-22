@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tdd-gleaner"
 version = "0.1.0"
-description = "Experiment store and annotation tools for tdd-gleaner."
+description = "Experiment store, annotation, and evaluation tools for tdd-gleaner."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
